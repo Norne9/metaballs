@@ -14,7 +14,7 @@ def update_balls(balls: np.ndarray, dt: float):
     for b in range(balls.shape[0]):
         radius = balls[b, 5]
         # move
-        balls[b, 0:2] += balls[b, 6:8] * dt
+        balls[b, 0:2] += balls[b, 6:8] * dt * 100.0
 
         # bounce x
         if balls[b, 0] < radius:
@@ -28,34 +28,57 @@ def update_balls(balls: np.ndarray, dt: float):
         elif balls[b, 1] > HEIGHT - radius:
             balls[b, 7] = -np.abs(balls[b, 7])
 
+        # bounce from others
+        for b2 in range(balls.shape[0]):
+            if b2 == b:
+                continue
+            dir = balls[b, 0:2] - balls[b2, 0:2]
+            dist2 = dir[0] * dir[0] + dir[1] * dir[1]
+            rad2 = balls[b, 5] + balls[b2, 5]
+            rad2 *= rad2
+
+            if dist2 < rad2:
+                balls[b, 6:8] = dir / np.max(np.abs(dir))
+
 
 @nb.jit(nopython=True, parallel=True)
 def draw_balls(screen: np.ndarray, balls: np.ndarray):
     w, h = screen.shape[0], screen.shape[1]
-    b_count = balls.shape[0]
+
     for start in nb.prange(CORES):
         for x in range(start, w, CORES):
             for y in range(h):
-                add = False
-                for b in range(b_count):
-                    bx, by = balls[b, 0], balls[b, 1]
-                    radius = balls[b, 5]
-                    rgb = balls[b, 2:5]
+                screen[x, y].fill(0)
 
+    b_count = balls.shape[0]
+    max_radius = balls[:, 5].max() * 2
+    for b in range(b_count):
+        bx, by = balls[b, 0], balls[b, 1]
+        radius = balls[b, 5]
+        rgb = balls[b, 2:5]
+
+        x_start = min(w, max(0, bx - max_radius * 2))
+        x_end = min(w, max(0, bx + max_radius * 2))
+        y_start = min(h, max(0, by - max_radius * 2))
+        y_end = min(h, max(0, by + max_radius * 2))
+
+        for start in nb.prange(CORES):
+            for x in range(x_start + start, x_end, CORES):
+                for y in range(y_start, y_end):
                     dx, dy = x - bx, y - by
                     light = radius * radius / (dx * dx + dy * dy)
                     for c in range(3):
-                        if add:
-                            screen[x, y, c] += rgb[c] * light * 255.0
-                        else:
-                            screen[x, y, c] = rgb[c] * light * 255.0
-                    add = True
+                        screen[x, y, c] += rgb[c] * light * 255.0
 
+    for start in nb.prange(CORES):
+        for x in range(start, w, CORES):
+            for y in range(h):
                 max_color = screen[x, y].max()
                 if max_color > 255:
                     screen[x, y] = screen[x, y] * 255 // max_color
                 else:
-                    screen[x, y] //= 3
+                    screen[x, y] *= screen[x, y]
+                    screen[x, y] //= 500
 
 
 def run():
@@ -71,15 +94,15 @@ def run():
     fps = 0
     clock = pg.time.Clock()
 
-    balls = np.empty((3, 8), dtype=np.float32)
+    balls = np.empty((5, 8), dtype=np.float32)
     for i in range(balls.shape[0]):
         # generate ball
-        radius = np.random.randint(5, 10) * 10
+        radius = np.random.randint(5, 10) * 5
         x, y = np.random.randint(radius, WIDTH - radius), np.random.randint(radius, HEIGHT - radius)
         color = np.random.rand(3)
         color[i % 3] = 1
         vel = np.random.rand(2)
-        vel = vel / vel.max() * 100.0
+        vel = vel / vel.max()
         # set ball
         balls[i, 0], balls[i, 1] = x, y
         balls[i, 2:5] = color
