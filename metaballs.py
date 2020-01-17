@@ -4,52 +4,58 @@ import numpy as np
 import numba as nb
 import os
 
-WIDTH = 1920
-HEIGHT = 1080
+WIDTH = 1280
+HEIGHT = 720
 CORES = os.cpu_count()
 
 
-@nb.jitclass([("x", nb.float32), ("y", nb.float32), ("rgb", nb.types.float32[:]), ("radius", nb.float32)])
-class Ball:
-    def __init__(
-        self,
-        x: float = 0,
-        y: float = 0,
-        rgb: np.ndarray = np.array([1.0, 1.0, 0.0], dtype=np.float32),
-        radius: float = 100,
-    ):
-        self.x = x
-        self.y = y
-        self.rgb = rgb
-        self.radius = radius
+# balls [x, y, r, g, b, radius, vx, vy]
+def update_balls(balls: np.ndarray, dt: float):
+    for b in range(balls.shape[0]):
+        radius = balls[b, 5]
+        # move
+        balls[b, 0:2] += balls[b, 6:8] * dt
+
+        # bounce x
+        if balls[b, 0] < radius:
+            balls[b, 6] = np.abs(balls[b, 6])
+        elif balls[b, 0] > WIDTH - radius:
+            balls[b, 6] = -np.abs(balls[b, 6])
+
+        # bounce y
+        if balls[b, 1] < radius:
+            balls[b, 7] = np.abs(balls[b, 7])
+        elif balls[b, 1] > HEIGHT - radius:
+            balls[b, 7] = -np.abs(balls[b, 7])
 
 
 @nb.jit(nopython=True, parallel=True)
-def draw_ball(screen: np.ndarray, ball: Ball, add: bool):
+def draw_balls(screen: np.ndarray, balls: np.ndarray):
     w, h = screen.shape[0], screen.shape[1]
+    b_count = balls.shape[0]
     for start in nb.prange(CORES):
         for x in range(start, w, CORES):
             for y in range(h):
-                dx, dy = x - ball.x, y - ball.y
-                light = ball.radius * ball.radius / (dx * dx + dy * dy)
-                for c in range(3):
-                    if add:
-                        screen[x, y, c] += ball.rgb[c] * light * 255.0
-                    else:
-                        screen[x, y, c] = ball.rgb[c] * light * 255.0
+                add = False
+                for b in range(b_count):
+                    bx, by = balls[b, 0], balls[b, 1]
+                    radius = balls[b, 5]
+                    rgb = balls[b, 2:5]
 
+                    dx, dy = x - bx, y - by
+                    light = radius * radius / (dx * dx + dy * dy)
+                    for c in range(3):
+                        if add:
+                            screen[x, y, c] += rgb[c] * light * 255.0
+                        else:
+                            screen[x, y, c] = rgb[c] * light * 255.0
+                    add = True
 
-@nb.jit(nopython=True, parallel=True)
-def clamp_colors(screen: np.ndarray):
-    w, h = screen.shape[0], screen.shape[1]
-    for start in nb.prange(CORES):
-        for x in range(start, w, CORES):
-            for y in range(h):
                 max_color = screen[x, y].max()
                 if max_color > 255:
                     screen[x, y] = screen[x, y] * 255 // max_color
                 else:
-                    screen[x, y] //= 2
+                    screen[x, y] //= 3
 
 
 def run():
@@ -65,25 +71,35 @@ def run():
     fps = 0
     clock = pg.time.Clock()
 
-    balls = [
-        Ball(x=500, y=500, rgb=np.array([1, 1, 0], dtype=np.float32)),
-        Ball(x=800, y=500, rgb=np.array([1, 0, 1], dtype=np.float32)),
-    ]
+    balls = np.empty((3, 8), dtype=np.float32)
+    for i in range(balls.shape[0]):
+        # generate ball
+        radius = np.random.randint(5, 10) * 10
+        x, y = np.random.randint(radius, WIDTH - radius), np.random.randint(radius, HEIGHT - radius)
+        color = np.random.rand(3)
+        color[i % 3] = 1
+        vel = np.random.rand(2)
+        vel = vel / vel.max() * 100.0
+        # set ball
+        balls[i, 0], balls[i, 1] = x, y
+        balls[i, 2:5] = color
+        balls[i, 5] = radius
+        balls[i, 6:8] = vel
+
     screen_arr = np.zeros((WIDTH, HEIGHT, 3), dtype=np.int32)
 
     while not done:
-        fps = fps * 0.97 + 1000.0 / max(clock.tick(), 1) * 0.03
+        dt = clock.tick()
+        fps = fps * 0.97 + 1000.0 / max(dt, 1) * 0.03
+        dt /= 1000.0
 
         for event in pg.event.get():  # User did something
             if event.type == pg.QUIT:  # If user clicked close
                 done = True  # Flag that we are done so we exit this loop
 
-        # numpy draw
-        draw_add = False
-        for ball in balls:
-            draw_ball(screen_arr, ball, draw_add)
-            draw_add = True
-        clamp_colors(screen_arr)
+        # numpy
+        update_balls(balls, dt)
+        draw_balls(screen_arr, balls)
         surfarray.blit_array(screen, screen_arr)
 
         # show fps
