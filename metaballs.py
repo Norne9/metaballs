@@ -1,25 +1,55 @@
 import pygame as pg
 from pygame import surfarray
 import numpy as np
-from numba import njit
+import numba as nb
+import os
 
 WIDTH = 1920
 HEIGHT = 1080
+CORES = os.cpu_count()
 
 
-@njit
-def proc_array(screen: np.ndarray, bx: float, by: float):
+@nb.jitclass([("x", nb.float32), ("y", nb.float32), ("rgb", nb.types.float32[:]), ("radius", nb.float32)])
+class Ball:
+    def __init__(
+        self,
+        x: float = 0,
+        y: float = 0,
+        rgb: np.ndarray = np.array([1.0, 1.0, 0.0], dtype=np.float32),
+        radius: float = 100,
+    ):
+        self.x = x
+        self.y = y
+        self.rgb = rgb
+        self.radius = radius
+
+
+@nb.jit(nopython=True, parallel=True)
+def draw_ball(screen: np.ndarray, ball: Ball, add: bool):
     w, h = screen.shape[0], screen.shape[1]
-    for x in range(w):
-        for y in range(h):
-            dx, dy = x - bx, y - by
-            dist = dx * dx + dy * dy
-            radius = 100.0
+    for start in nb.prange(CORES):
+        for x in range(start, w, CORES):
+            for y in range(h):
+                dx, dy = x - ball.x, y - ball.y
+                light = ball.radius * ball.radius / (dx * dx + dy * dy)
+                for c in range(3):
+                    if add:
+                        screen[x, y, c] += ball.rgb[c] * light * 255.0
+                    else:
+                        screen[x, y, c] = ball.rgb[c] * light * 255.0
 
-            light = min(1.0, radius * radius / max(1.0, dist))
-            light = light / 2.0 if light < 1 else light
 
-            screen[x, y, 2] = light * 255
+@nb.jit(nopython=True, parallel=True)
+def clamp_colors(screen: np.ndarray):
+    w, h = screen.shape[0], screen.shape[1]
+    for start in nb.prange(CORES):
+        for x in range(start, w, CORES):
+            for y in range(h):
+                max_color = screen[x, y].max()
+                if max_color > 255:
+                    screen[x, y] = screen[x, y] * 255 // max_color
+                else:
+                    screen[x, y] //= 2
 
 
 def run():
@@ -35,8 +65,12 @@ def run():
     fps = 0
     clock = pg.time.Clock()
 
-    # coord_arr = np.array([[[x, y] for y in range(HEIGHT)] for x in range(WIDTH)], dtype=np.float)
-    screen_arr = np.zeros((WIDTH, HEIGHT, 3), dtype=np.dtype("u1"))
+    balls = [
+        Ball(x=500, y=500, rgb=np.array([1, 1, 0], dtype=np.float32)),
+        Ball(x=800, y=500, rgb=np.array([1, 0, 1], dtype=np.float32)),
+    ]
+    screen_arr = np.zeros((WIDTH, HEIGHT, 3), dtype=np.int32)
+
     while not done:
         fps = fps * 0.97 + 1000.0 / max(clock.tick(), 1) * 0.03
 
@@ -45,7 +79,11 @@ def run():
                 done = True  # Flag that we are done so we exit this loop
 
         # numpy draw
-        proc_array(screen_arr, 500, 500)
+        draw_add = False
+        for ball in balls:
+            draw_ball(screen_arr, ball, draw_add)
+            draw_add = True
+        clamp_colors(screen_arr)
         surfarray.blit_array(screen, screen_arr)
 
         # show fps
