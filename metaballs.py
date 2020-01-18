@@ -6,7 +6,7 @@ import os
 WIDTH = 800
 HEIGHT = 600
 CORES = os.cpu_count()
-
+DEFAULT_N_BALLS = 6
 
 @nb.njit
 def update_balls(balls: np.ndarray, dt: float):
@@ -75,11 +75,28 @@ def draw_balls(screen: np.ndarray, balls: np.ndarray):
                     screen[x, y] *= screen[x, y]
                     screen[x, y] //= 500
 
+def create_balls(n_balls):
+    # make random balls
+    balls = np.empty((n_balls, 8), dtype=np.float32)
+    for i in range(balls.shape[0]):
+        # generate ball
+        radius = np.random.randint(5, 15) * 5
+        x, y = np.random.randint(radius, WIDTH - radius), np.random.randint(radius, HEIGHT - radius)
+        color = np.random.rand(3)
+        color[i % 3] = 1
+        vel = np.random.rand(2)
+        vel = vel / vel.max()
+        # put ball to array
+        balls[i, 0], balls[i, 1] = x, y
+        balls[i, 2:5] = color
+        balls[i, 5] = radius
+        balls[i, 6:8] = vel
+    return balls
 
 def run():
     # set seed for repeatability
     np.random.seed(2)
-
+    n_balls = DEFAULT_N_BALLS
     # init pygame
     pg.init()
     pg.font.init()
@@ -100,22 +117,7 @@ def run():
     screen.blit(text, (16, 16))
     pg.display.flip()
 
-    # make random balls
-    balls = np.empty((6, 8), dtype=np.float32)
-    for i in range(balls.shape[0]):
-        # generate ball
-        radius = np.random.randint(5, 15) * 5
-        x, y = np.random.randint(radius, WIDTH - radius), np.random.randint(radius, HEIGHT - radius)
-        color = np.random.rand(3)
-        color[i % 3] = 1
-        vel = np.random.rand(2)
-        vel = vel / vel.max()
-        # put ball to array
-        balls[i, 0], balls[i, 1] = x, y
-        balls[i, 2:5] = color
-        balls[i, 5] = radius
-        balls[i, 6:8] = vel
-
+    balls = create_balls(n_balls)
     # numpy array for screen
     screen_arr = np.zeros((WIDTH, HEIGHT, 3), dtype=np.int32)
 
@@ -127,7 +129,14 @@ def run():
         for event in pg.event.get():  # process events
             if event.type == pg.QUIT:  # clicked close
                 done = True  # exit loop
-
+            elif event.type == pg.KEYDOWN and event.key == pg.K_SPACE:
+                balls = create_balls(n_balls)
+            elif event.type == pg.KEYDOWN and event.key == pg.K_UP:
+                n_balls += 1
+                balls = create_balls(n_balls)
+            elif event.type == pg.KEYDOWN and event.key == pg.K_DOWN:
+                n_balls -= 1
+                balls = create_balls(n_balls)
         # numpy
         update_balls(balls, dt)  # move balls
         draw_balls(screen_arr, balls)  # draw balls in numpy array
@@ -136,7 +145,8 @@ def run():
         # show fps
         text = font.render(f"FPS: {fps:4.0f}", False, (255, 255, 255))
         screen.blit(text, (16, 16))
-
+        text = font.render(f"PRESS SPACE TO RELOAD. UP TO INCREASE BALL AMOUNT. DOWN TO REDUCE BALL AMOUNT", False, (255, 255, 255))
+        screen.blit(text, (16, HEIGHT-16))
         pg.display.flip()
 
     pg.quit()
