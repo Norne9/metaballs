@@ -8,6 +8,7 @@ HEIGHT = 600
 CORES = os.cpu_count()
 DEFAULT_N_BALLS = 6
 
+
 @nb.njit
 def update_balls(balls: np.ndarray, dt: float):
     # balls -> [[x, y, r, g, b, radius, vx, vy]]
@@ -41,7 +42,7 @@ def update_balls(balls: np.ndarray, dt: float):
                 balls[b, 6:8] = delta / np.max(np.abs(delta))
 
 
-@nb.jit(nopython=True, parallel=True)
+@nb.njit(parallel=True)
 def draw_balls(screen: np.ndarray, balls: np.ndarray):
     w, h = screen.shape[0], screen.shape[1]
     b_count = balls.shape[0]
@@ -75,6 +76,7 @@ def draw_balls(screen: np.ndarray, balls: np.ndarray):
                     screen[x, y] *= screen[x, y]
                     screen[x, y] //= 500
 
+
 def create_balls(n_balls):
     # make random balls
     balls = np.empty((n_balls, 8), dtype=np.float32)
@@ -93,10 +95,10 @@ def create_balls(n_balls):
         balls[i, 6:8] = vel
     return balls
 
+
 def run():
     # set seed for repeatability
     np.random.seed(2)
-    n_balls = DEFAULT_N_BALLS
     # init pygame
     pg.init()
     pg.font.init()
@@ -106,15 +108,16 @@ def run():
     # set window title
     pg.display.set_caption(f"Metaballs {WIDTH}x{HEIGHT}")
     # load system font
-    font = pg.font.SysFont("Arial", 16, bold=True)
+    font = pg.font.SysFont(pg.font.get_default_font(), 24)
 
     # necessary variables
-    done, fps = False, 0
+    n_balls = DEFAULT_N_BALLS
+    done = False
     clock = pg.time.Clock()
 
-    # show loading
+    # show loading at center
     text = font.render("LOADING...", False, (255, 255, 255))
-    screen.blit(text, (16, 16))
+    screen.blit(text, (WIDTH / 2 - text.get_width() / 2, HEIGHT / 2 - text.get_height() / 2))
     pg.display.flip()
 
     balls = create_balls(n_balls)
@@ -122,31 +125,34 @@ def run():
     screen_arr = np.zeros((WIDTH, HEIGHT, 3), dtype=np.int32)
 
     while not done:
-        dt = clock.tick()  # get elapsed milliseconds
-        fps = fps * 0.97 + 1000.0 / max(dt, 1) * 0.03
-        dt /= 1000.0
+        dt = clock.tick() / 1000.0  # get elapsed seconds
 
         for event in pg.event.get():  # process events
             if event.type == pg.QUIT:  # clicked close
                 done = True  # exit loop
-            elif event.type == pg.KEYDOWN and event.key == pg.K_SPACE:
-                balls = create_balls(n_balls)
-            elif event.type == pg.KEYDOWN and event.key == pg.K_UP:
-                n_balls += 1
-                balls = create_balls(n_balls)
-            elif event.type == pg.KEYDOWN and event.key == pg.K_DOWN:
-                n_balls -= 1
-                balls = create_balls(n_balls)
+            elif event.type == pg.KEYDOWN:
+                if event.key == pg.K_SPACE:
+                    balls = create_balls(n_balls)
+                elif event.key == pg.K_UP:
+                    n_balls += 1
+                    balls = create_balls(n_balls)
+                elif event.key == pg.K_DOWN:
+                    n_balls -= 1
+                    balls = create_balls(n_balls)
+
         # numpy
         update_balls(balls, dt)  # move balls
         draw_balls(screen_arr, balls)  # draw balls in numpy array
         pg.surfarray.blit_array(screen, screen_arr)  # draw array on screen
 
         # show fps
-        text = font.render(f"FPS: {fps:4.0f}", False, (255, 255, 255))
+        text = font.render(f"FPS: {clock.get_fps():4.0f}", False, (255, 255, 255))
         screen.blit(text, (16, 16))
-        text = font.render(f"PRESS SPACE TO RELOAD. UP TO INCREASE BALL AMOUNT. DOWN TO REDUCE BALL AMOUNT", False, (255, 255, 255))
-        screen.blit(text, (16, HEIGHT-16))
+        text = font.render(
+            f"PRESS SPACE TO RELOAD. UP TO INCREASE BALL AMOUNT. DOWN TO REDUCE BALL AMOUNT", False, (255, 255, 255)
+        )
+        screen.blit(text, (16, HEIGHT - 40))
+
         pg.display.flip()
 
     pg.quit()
