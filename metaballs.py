@@ -36,7 +36,7 @@ def update_balls(balls: np.ndarray, dt: float):
                 balls[b].vel = delta / np.max(np.abs(delta))
 
 
-@nb.njit(parallel=True)
+@nb.njit(parallel=True, fastmath=True)
 def draw_balls(screen: np.ndarray, balls: np.ndarray):
     w, h = screen.shape[0], screen.shape[1]
     b_count = balls.shape[0]
