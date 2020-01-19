@@ -9,37 +9,31 @@ CORES = os.cpu_count()
 DEFAULT_N_BALLS = 6
 
 
-@nb.njit
 def update_balls(balls: np.ndarray, dt: float):
-    # balls -> [[x, y, r, g, b, radius, vx, vy]]
     for b in range(balls.shape[0]):
-        radius = balls[b, 5]
         # move
-        balls[b, 0:2] += balls[b, 6:8] * dt * 80.0
+        balls[b].pos += balls[b].vel * dt * 80.0
 
-        # bounce x
-        if balls[b, 0] < radius:
-            balls[b, 6] = np.abs(balls[b, 6])
-        elif balls[b, 0] > WIDTH - radius:
-            balls[b, 6] = -np.abs(balls[b, 6])
-
-        # bounce y
-        if balls[b, 1] < radius:
-            balls[b, 7] = np.abs(balls[b, 7])
-        elif balls[b, 1] > HEIGHT - radius:
-            balls[b, 7] = -np.abs(balls[b, 7])
+        # bounce from bounds
+        screen = [WIDTH, HEIGHT]
+        for axis in range(2):
+            if balls[b].pos[axis] < balls[b].radius:
+                balls[b].vel[axis] = np.abs(balls[b].vel[axis])
+            elif balls[b].pos[axis] > screen[axis] - balls[b].radius:
+                balls[b].vel[axis] = -np.abs(balls[b].vel[axis])
 
         # bounce from others
         for b2 in range(balls.shape[0]):
             if b2 == b:
                 continue
-            delta = balls[b, 0:2] - balls[b2, 0:2]
-            dist2 = delta[0] * delta[0] + delta[1] * delta[1]
-            rad2 = balls[b, 5] + balls[b2, 5]
+
+            delta = balls[b].pos - balls[b2].pos
+            dist2 = np.dot(delta, delta)
+            rad2 = balls[b].radius + balls[b2].radius
             rad2 *= rad2
 
             if dist2 < rad2:
-                balls[b, 6:8] = delta / np.max(np.abs(delta))
+                balls[b].vel = delta / np.max(np.abs(delta))
 
 
 @nb.njit(parallel=True)
@@ -55,18 +49,13 @@ def draw_balls(screen: np.ndarray, balls: np.ndarray):
                 screen[x, y].fill(0)  # clear pixel
                 # for each ball
                 for b in range(b_count):
-                    # get ball data from array
-                    bx, by = balls[b, 0], balls[b, 1]
-                    radius = balls[b, 5]
-                    rgb = balls[b, 2:5]
-
                     # calculate value
-                    dx, dy = x - bx, y - by
-                    light = radius * radius / (dx * dx + dy * dy)
+                    dx, dy = balls[b].pos[0] - x, balls[b].pos[1] - y
+                    light = balls[b].radius * balls[b].radius / (dx * dx + dy * dy)
 
                     # multiply value by ball color
                     for c in range(3):
-                        screen[x, y, c] += rgb[c] * light * 255.0
+                        screen[x, y, c] += balls[b].rgb[c] * light * 255.0
 
                 # if color > max => normalize color
                 max_color = screen[x, y].max()
@@ -78,21 +67,21 @@ def draw_balls(screen: np.ndarray, balls: np.ndarray):
 
 
 def create_balls(n_balls):
-    # make random balls
-    balls = np.empty((n_balls, 8), dtype=np.float32)
+    """make random balls"""
+    balls = np.recarray(
+        (n_balls,), dtype=[("pos", ("<f4", (2,))), ("rgb", ("<f4", (3,))), ("radius", "f4"), ("vel", ("<f4", (2,)))],
+    )
     for i in range(balls.shape[0]):
         # generate ball
-        radius = np.random.randint(5, 15) * 5
-        x, y = np.random.randint(radius, WIDTH - radius), np.random.randint(radius, HEIGHT - radius)
-        color = np.random.rand(3)
-        color[i % 3] = 1
-        vel = np.random.rand(2)
-        vel = vel / vel.max()
-        # put ball to array
-        balls[i, 0], balls[i, 1] = x, y
-        balls[i, 2:5] = color
-        balls[i, 5] = radius
-        balls[i, 6:8] = vel
+        balls[i].radius = np.random.randint(5, 15) * 5
+        balls[i].pos = (
+            np.random.randint(balls[i].radius, WIDTH - balls[i].radius),
+            np.random.randint(balls[i].radius, HEIGHT - balls[i].radius),
+        )
+        balls[i].rgb = np.random.rand(3)
+        balls[i].rgb[i % 3] = 1
+        balls[i].vel = np.random.rand(2)
+        balls[i].vel = balls[i].vel / balls[i].vel.max()
     return balls
 
 
@@ -117,7 +106,7 @@ def run():
 
     # show loading at center
     text = font.render("LOADING...", False, (255, 255, 255))
-    screen.blit(text, (WIDTH / 2 - text.get_width() / 2, HEIGHT / 2 - text.get_height() / 2))
+    screen.blit(text, (WIDTH // 2 - text.get_width() // 2, HEIGHT // 2 - text.get_height() // 2))
     pg.display.flip()
 
     balls = create_balls(n_balls)
@@ -137,7 +126,7 @@ def run():
                     n_balls += 1
                     balls = create_balls(n_balls)
                 elif event.key == pg.K_DOWN:
-                    n_balls -= 1
+                    n_balls = max(1, n_balls - 1)
                     balls = create_balls(n_balls)
 
         # numpy
